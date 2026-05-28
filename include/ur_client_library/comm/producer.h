@@ -77,6 +77,9 @@ private:
       if (stream_.closed())
         return false;
 
+      if (!running_)
+        return false;
+
       if (on_reconnect_cb_)
       {
         URCL_LOG_WARN("Failed to read from stream, invoking on reconnect callback and stopping the producer");
@@ -84,8 +87,13 @@ private:
         return false;
       }
 
-      URCL_LOG_WARN("Failed to read from stream, reconnecting in %ld seconds...", timeout_.count());
-      std::this_thread::sleep_for(timeout_);
+      const long long seconds = timeout_.count();
+      URCL_LOG_WARN("Failed to read from stream, reconnecting in %ld seconds, running = %d...", seconds, running_);
+      for (long long i = 0; i < seconds && running_; ++i)
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+
+      if (!running_)
+        return false;
 
       if (stream_.connect())
         continue;

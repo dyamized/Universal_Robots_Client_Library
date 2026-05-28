@@ -932,7 +932,19 @@ void RTDEClient::reconnectCallback()
   }
   if (reconnecting_thread_.joinable())
   {
-    reconnecting_thread_.join();
+    try
+    {
+      reconnecting_thread_.join();
+    }
+    catch (const std::system_error&)
+    {
+      // Destructor already joined this thread concurrently; bail out.
+      return;
+    }
+  }
+  if (stop_reconnection_)
+  {
+    return;
   }
   reconnecting_ = true;
   reconnecting_thread_ = std::thread(&RTDEClient::reconnect, this);
