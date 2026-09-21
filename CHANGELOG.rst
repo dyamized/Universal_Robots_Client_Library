@@ -2,6 +2,70 @@
 Changelog for package ur_client_library
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.15.2 (2026-09-14)
+-------------------
+* Remove Symlink to UR5 programs as it was not needed and blocked the bloom release tool (`#569 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/569>`_)
+* Contributors: Felix Exner
+
+2.15.1 (2026-09-10)
+-------------------
+* Tolerate null values in the PolyScope X program list (`#565 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/565>`_)
+* Fix flaky spline interpolation test (`#556 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/556>`_)
+* Error codes are now also followed by a description (`#564 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/564>`_)
+* Contributors: Felix Exner, Michael Mair, URJala
+
+2.15.0 (2026-09-03)
+-------------------
+* Robot api 10.14 (`#549 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/549>`_)
+* Fix spline point velocity and acceleration precision (`#559 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/559>`_)
+* MotionTarget helpers (`#558 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/558>`_)
+* [CI] Support running PolyScope X robot in remote control mode in CI (`#553 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/553>`_)
+* [CI] Update downstream branch for lyrical (`#555 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/555>`_)
+* [CI] Add exclude rule for stackoverflow (`#557 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/557>`_)
+* [CI] Separate standalone instruction executor test into its own file (`#554 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/554>`_)
+* Contributors: Felix Exner, Hasan Amin, URJala
+
+2.14.1 (2026-08-07)
+-------------------
+* fix: teardown blocks indefinitely when a reconnect thread is active and the robot is unreachable (`#519 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/519>`_)
+* Harden script_reader against vulnerabilities (`#546 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/546>`_)
+* Add missing keys to RTDEInvalidKeyException
+* Fix OOB read vulnerability in bin parser (`#545 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/545>`_)
+* [start_ursim] Offer updating g5 urcap (`#543 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/543>`_)
+* Link urcl to rt on non-Apple Unix (`#540 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/540>`_)
+* Fix dependencies for bats (`#542 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/542>`_)
+* Bump actions/setup-python from 6 to 7 (`#541 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/541>`_)
+* Contributors: Felix Exner, Rune Søe-Knudsen, Tobias Fischer, dependabot[bot]
+
+2.14.0 (2026-07-17)
+-------------------
+* RTDE: Add target_base_wrench field (`#539 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/539>`_)
+* Use tcp_nodelay on socket server (`#537 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/537>`_)
+* Streaming API for trajectory forwarding (`#528 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/528>`_)
+* background Enable FIFO scheduling by default for RTDE producer thread (`#536 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/536>`_)
+* Update cpp-httplib to version 0.49.0 (`#534 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/534>`_)
+* Update ici config with host-mounted urcap storage and test upload (`#532 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/532>`_)
+* Bump actions/cache from 5 to 6 (`#533 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/533>`_)
+* [tests] Enable running integration tests against a custom robot IP (`#531 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/531>`_)
+* Fix RTDE control_step (`#529 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/529>`_)
+* Enhance robot program state logging with clearer messages for running… (`#527 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/527>`_)
+* Add 10.13 to test matrix (`#517 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/517>`_)
+* Bump actions/checkout from 6 to 7 (`#525 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/525>`_)
+* Contributors: Andrew C. Morrow, Felix Exner, Rune Søe-Knudsen, Sergi Romero, dependabot[bot]
+
+2.13.0 (2026-06-17)
+-------------------
+* [ScriptCommandInterface] Add set_target_payload support to ScriptCommandInterface (`#515 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/515>`_)
+* [Primary] sendScriptBlocking: Restart interface and resend script on readOnlyInterfaceException (`#522 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/522>`_)
+* [DashboardClientX] Apply httplib timeouts; wire setReceiveTimeout() (`#518 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/518>`_)
+* [Docs] Remove section about URCapX in development (`#521 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/521>`_)
+* [Primary] Send script blocking return refactor (`#520 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/520>`_)
+* Add missing robot types to helper functions (`#513 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/513>`_)
+* [RTDE] Add new controller_step RTDE field (`#514 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/514>`_)
+* [Primary] Primary client script execution feedback (`#484 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/484>`_)
+* Add robotSeriesString function (`#510 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/510>`_)
+* Contributors: Felix Exner, Sergi Romero, URJala, Vinicius de Oliveira, dependabot[bot]
+
 2.12.0 (2026-05-19)
 -------------------
 * [CI] Make circular motion in example more compatible (`#508 <https://github.com/UniversalRobots/Universal_Robots_Client_Library/issues/508>`_)

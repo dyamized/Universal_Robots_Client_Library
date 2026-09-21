@@ -31,8 +31,8 @@
 PERSISTENT_BASE="${HOME}/.ursim"
 URCAP_VERSION="latest"
 IP_ADDRESS="192.168.56.101"
-PORT_FORWARDING_WITH_DASHBOARD="-p 30001-30004:30001-30004 -p 29999:29999"
-PORT_FORWARDING_WITHOUT_DASHBOARD="-p 30001-30004:30001-30004"
+PORT_FORWARDING_WITH_DASHBOARD="-p 30001-30004:30001-30004 -p 29999:29999 -p 127.0.0.1:5900:5900 -p 127.0.0.1:6080:6080"
+PORT_FORWARDING_WITHOUT_DASHBOARD="-p 30001-30004:30001-30004 -p 127.0.0.1:8000:80"
 CONTAINER_NAME="ursim"
 TEST_RUN=false
 
@@ -49,12 +49,19 @@ help()
                    for available versions. Defaults to 'latest'"
   echo "    -p <folder>    Location from which programs are read / to which programs are written.
                    If not specified, will fallback to ${PERSISTENT_BASE}/${ROBOT_SERIES}/${ROBOT_MODEL}/programs"
+  echo "    -c <folder>    Location of the citadelDB to mount into the URSim container.
+                   Only used for PolyScope X. Enables persisting settings such as
+                   remote-control mode across container restarts.
+                   If not specified, no citadelDB volume is mounted."
   echo "    -u <folder>    Location from which URCaps are read / to which URCaps are written.
                    If not specified, will fallback to ${PERSISTENT_BASE}/${ROBOT_SERIES}/urcaps"
   echo "    -n             Name of the docker container. Defaults to '$CONTAINER_NAME'"
   echo "    -i             IP address the container should get. Defaults to $IP_ADDRESS"
   echo "    -d             Detached mode - start in background"
-  echo "    -f             Specify port forwarding to use. Defaults to '$PORT_FORWARDING'. Set to \"DISABLED\" to disable port forwarding."
+  echo "    -f             Specify port forwarding to use. Defaults to
+                     - '$PORT_FORWARDING_WITH_DASHBOARD' (CB3 and PolyScope 5)
+                     - '$PORT_FORWARDING_WITHOUT_DASHBOARD' (PolyScope X).
+                   Set to \"DISABLED\" to disable port forwarding."
   echo "    -h             Print this Help."
   echo
 }
@@ -64,6 +71,7 @@ ROBOT_SERIES=""
 URSIM_VERSION=latest
 PORT_FORWARDING=""
 PROGRAM_STORAGE_ARG=""
+CITADEL_DB_STORAGE_ARG=""
 URCAP_STORAGE_ARG=""
 DETACHED=false
 
@@ -228,11 +236,68 @@ validate_parameters()
   exit 1
 }
 
+# Query the published host endpoint for a container port via `docker port`.
+# Echoes HOST:PORT suitable for access URLs. Wildcard binds (0.0.0.0 / [::]) are
+# reported as localhost; other bind addresses are preserved (IPv6 keeps brackets).
+# Only TCP mappings are considered. Returns 0 on success, 1 if not published.
+get_forwarded_access_endpoint()
+{
+  local container_port=$1
+  local docker_output host_port_line bind_addr host_port access_host
+
+  if ! docker_output=$(docker port "$CONTAINER_NAME" "${container_port}/tcp" 2>/dev/null); then
+    return 1
+  fi
+  [[ -z "$docker_output" ]] && return 1
+
+  # Prefer an IPv4 mapping when Docker lists both address families.
+  host_port_line=$(echo "$docker_output" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+$' | head -n1)
+  if [[ -z "$host_port_line" ]]; then
+    host_port_line=$(echo "$docker_output" | head -n1)
+  fi
+
+  if [[ "$host_port_line" =~ ^\[([^\]]+)\]:([0-9]+)$ ]]; then
+    bind_addr="[${BASH_REMATCH[1]}]"
+    host_port="${BASH_REMATCH[2]}"
+  elif [[ "$host_port_line" =~ ^([^:]+):([0-9]+)$ ]]; then
+    bind_addr="${BASH_REMATCH[1]}"
+    host_port="${BASH_REMATCH[2]}"
+  else
+    return 1
+  fi
+
+  if [[ "$bind_addr" == "0.0.0.0" || "$bind_addr" == "[::]" ]]; then
+    access_host="localhost"
+  else
+    access_host="$bind_addr"
+  fi
+  echo "${access_host}:${host_port}"
+  return 0
+}
+
 post_setup_cb3()
 {
   echo "Docker URSim is running"
   echo -e "\nTo access PolyScope, open the following URL in a web browser."
   printf "\n\n\thttp://%s:6080/vnc.html\n\n" "$IP_ADDRESS"
+  printf "\tor connect with a VNC client to %s:5900\n\n" "$IP_ADDRESS"
+
+  local web_endpoint vnc_endpoint
+  web_endpoint=$(get_forwarded_access_endpoint 6080) || web_endpoint=""
+  vnc_endpoint=$(get_forwarded_access_endpoint 5900) || vnc_endpoint=""
+
+  echo "NOTE: The container-IP access will only work when the browser can reach Docker's bridge network. This is typically not the case when using Docker Desktop."
+  if [[ -n "$web_endpoint" || -n "$vnc_endpoint" ]]; then
+    echo "The published VNC endpoints are shown below. If you want to have the robot interface accessible from a remote client, override -f to bind the GUI ports (6080 and 5900) to a reachable interface."
+  fi
+
+  if [[ -n "$web_endpoint" ]]; then
+    printf "\n\tAccess VNC web: http://%s/vnc.html" "$web_endpoint"
+  fi
+  if [[ -n "$vnc_endpoint" ]]; then
+    printf "\n\tAccess via VNC client: %s" "$vnc_endpoint"
+  fi
+  printf "\n\n"
 }
 post_setup_e-series()
 {
@@ -283,6 +348,37 @@ get_download_url_urcap()
   URCAP_DOWNLOAD_URL="https://github.com/UniversalRobots/Universal_Robots_ExternalControl_URCap/releases/download/v$URCAP_VERSION/externalcontrol-$URCAP_VERSION.jar"
 }
 
+# Prompt the user whether an already-installed External Control URCap should be
+# replaced by a newer version. If no answer is given within URCAP_PROMPT_TIMEOUT
+# seconds (default: 10), the prompt is cancelled and the existing version is kept.
+#
+# $1 the new URCap version that would be installed
+# reads URCAP_STORAGE for the prompt message
+# reads URCAP_PROMPT_TIMEOUT (env, optional) for the timeout in seconds
+# returns 0 if the user accepted the update, 1 otherwise (including on timeout)
+prompt_urcap_update()
+{
+  local new_version=$1
+  local timeout=${URCAP_PROMPT_TIMEOUT:-10}
+  local answer=""
+
+  echo "An older version of the External Control URCap is already present in ${URCAP_STORAGE}."
+  echo "Do you want to remove it and download the latest version (${new_version})? [y/N] (auto-N in ${timeout}s)"
+  if ! read -r -t "$timeout" answer; then
+    answer=""
+    echo # newline after the timed-out prompt
+    echo "No answer within ${timeout}s, continuing with the existing version."
+  fi
+  case "$answer" in
+    [yY][eE][sS]|[yY])
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 post_setup_polyscopex()
 {
 
@@ -298,29 +394,47 @@ post_setup_polyscopex()
     curl -L -o "$urcapx_file" "$URCAPX_DOWNLOAD_URL"
   fi
 
+  # Prefer a published host mapping for HTTP (needed on Docker Desktop / NAT where the
+  # container IP is unreachable). Fall back to the container IP when nothing is published.
+  local forwarded_endpoint http_host
+  if forwarded_endpoint=$(get_forwarded_access_endpoint 80); then
+    http_host="$forwarded_endpoint"
+  else
+    http_host="$IP_ADDRESS"
+  fi
+  local base_url="http://${http_host}"
+  local urcaps_url="${base_url}/universal-robots/urservice/api/v1/urcaps"
+
   echo -ne "Starting URSim. Waiting for UrService to be up..."
-  curl_cmd="curl --retry-connrefused -f --write-out %{http_code} --silent --output /dev/null $IP_ADDRESS/universal-robots/urservice/api/v1/urcaps"
-  status_code=$(eval "$curl_cmd")
+  status_code=$(curl --retry-connrefused -f --write-out "%{http_code}" --silent --output /dev/null "$urcaps_url")
 
   until [ "$status_code" == "200" ]
   do
     sleep 1
     echo -ne "."
-    status_code=$(eval "$curl_cmd")
+    status_code=$(curl --retry-connrefused -f --write-out "%{http_code}" --silent --output /dev/null "$urcaps_url")
   done
 
   echo ""; echo "UrService is up"
 
   echo "Installing URCapX $urcapx_file"
-  curl --location --request POST  --silent --output /dev/null "$IP_ADDRESS/universal-robots/urservice/api/v1/urcaps" --form urcapxFile=@"${urcapx_file}"
+  curl --location --request POST  --silent --output /dev/null "$urcaps_url" --form urcapxFile=@"${urcapx_file}"
   echo "";
 
   echo -e "\nTo access PolyScopeX, open the following URL in a web browser."
   printf "\n\n\thttp://%s\n\n" "$IP_ADDRESS"
+
+  echo "NOTE: The container-IP access will only work when the browser can reach Docker's bridge network. This is typically not the case when using Docker Desktop."
+  if [[ -n "$forwarded_endpoint" ]]; then
+    echo "The published PolyScope X endpoint is shown below. If you want to have the robot interface accessible from a remote client, override -f to bind the GUI port (80) to a reachable interface."
+    printf "\n\tAccess PolyScope X: http://%s\n\n" "$forwarded_endpoint"
+  else
+    printf "\n"
+  fi
 }
 
 parse_arguments(){
-  while getopts ":hm:v:p:u:i:f:n:dt" option; do
+  while getopts ":hm:v:p:c:u:i:f:n:dt" option; do
     case $option in
       h) # display Help
         help
@@ -333,6 +447,9 @@ parse_arguments(){
         ;;
       p) # program_folder
         PROGRAM_STORAGE_ARG=${OPTARG}
+        ;;
+      c) # citadel_db_folder
+        CITADEL_DB_STORAGE_ARG=${OPTARG}
         ;;
       u) # urcaps_folder
         URCAP_STORAGE_ARG=${OPTARG}
@@ -438,12 +555,6 @@ main() {
     PORT_FORWARDING=""
   fi
 
-  DOCKER_ARGS=""
-
-  if [ "$ROBOT_SERIES" == "polyscopex" ]; then
-    DOCKER_ARGS="$DOCKER_ARGS --privileged"
-  fi
-
   if [ -n "$PROGRAM_STORAGE_ARG" ]; then
     PROGRAM_STORAGE="$PROGRAM_STORAGE_ARG"
   fi
@@ -461,18 +572,22 @@ main() {
     mkdir -p "${PROGRAM_STORAGE}"
     PROGRAM_STORAGE=$(realpath "$PROGRAM_STORAGE")
 
-    ROBOT_MODEL_CONTROLLER_FLAG=""
-    verlte "10.7.0" "$URSIM_VERSION" && verlte "$URSIM_VERSION" "10.8.0" && ROBOT_MODEL_CONTROLLER_FLAG="-e ROBOT_TYPE_CONTROLLER=${ROBOT_MODEL}"
+    docker_args=(docker run --rm -d
+        --net ursim_net --ip "$IP_ADDRESS"
+        --privileged
+        -v "${PROGRAM_STORAGE}:/ur/bin/backend/applications"
+        -e "ROBOT_TYPE=${ROBOT_MODEL}"
+    )
 
-    docker_cmd="docker run --rm -d \
-      --net ursim_net --ip $IP_ADDRESS \
-      -v ${PROGRAM_STORAGE}:/ur/bin/backend/applications \
-      -e ROBOT_TYPE=${ROBOT_MODEL} \
-      $ROBOT_MODEL_CONTROLLER_FLAG \
-      $PORT_FORWARDING \
-      $DOCKER_ARGS \
-      --name $CONTAINER_NAME \
-      universalrobots/ursim_${ROBOT_SERIES}:$URSIM_VERSION"
+    if [ -n "$CITADEL_DB_STORAGE_ARG" ]; then
+      mkdir -p "$CITADEL_DB_STORAGE_ARG"
+      CITADEL_DB_STORAGE=$(realpath "$CITADEL_DB_STORAGE_ARG")
+      docker_args+=(-v "${CITADEL_DB_STORAGE}:/citadelDB")
+    fi
+
+    verlte "10.7.0" "$URSIM_VERSION" && verlte "$URSIM_VERSION" "10.8.0" && \
+      docker_args+=(-e "ROBOT_TYPE_CONTROLLER=${ROBOT_MODEL}")
+
   else
     # Create local storage for programs and URCaps
     mkdir -p "${URCAP_STORAGE}"
@@ -482,25 +597,53 @@ main() {
 
     # Download external_control URCap
     get_download_url_urcap $URCAP_VERSION
+    download_urcap=false
     if [[ ! -f "${URCAP_STORAGE}/externalcontrol-${URCAP_VERSION}.jar" ]]; then
-      echo "Downloading and installing External Control URCap version ${URCAP_VERSION}"
-      curl -L -o "${URCAP_STORAGE}/externalcontrol-${URCAP_VERSION}.jar" "$URCAP_DOWNLOAD_URL"
+      # if externalcontrol-<version>.jar does exist with another version, prompt the user whether
+      # the newer version should be downloaded and used.
+      shopt -s nullglob
+      existing_urcaps=( "${URCAP_STORAGE}"/externalcontrol-*.jar )
+      if ((${#existing_urcaps[@]})); then
+        if prompt_urcap_update "$URCAP_VERSION"; then
+          rm -f "${URCAP_STORAGE}/externalcontrol-"*.jar
+          download_urcap=true
+        else
+          echo "Continuing without downloading the latest version. The older version will be used."
+        fi
+      else
+        download_urcap=true
+      fi
+      if [[ $download_urcap = true ]]; then
+        echo "Downloading and installing External Control URCap version ${URCAP_VERSION}"
+        if curl -L -o "${URCAP_STORAGE}/externalcontrol-${URCAP_VERSION}.jar" "$URCAP_DOWNLOAD_URL"; then
+          if ((${#existing_urcaps[@]})); then
+            rm -f "${existing_urcaps[@]}"
+          fi
+        fi
+      fi
     fi
-    docker_cmd="docker run --rm -d --net ursim_net --ip $IP_ADDRESS\
-      -v ${URCAP_STORAGE}:/urcaps \
-      -v ${PROGRAM_STORAGE}:/ursim/programs \
-      -v ${POLYSCOPE_STORAGE}:/ursim/.polyscope \
-      -e ROBOT_MODEL=${ROBOT_MODEL} \
-      $PORT_FORWARDING \
-      --name $CONTAINER_NAME \
-      universalrobots/ursim_${ROBOT_SERIES}:$URSIM_VERSION"
+
+    docker_args=(docker run --rm -d
+        --net ursim_net --ip "$IP_ADDRESS"
+        -v "${URCAP_STORAGE}:/urcaps"
+        -v "${PROGRAM_STORAGE}:/ursim/programs"
+        -v "${POLYSCOPE_STORAGE}:/ursim/.polyscope"
+        -e "ROBOT_MODEL=${ROBOT_MODEL}"
+    )
   fi
 
+  if [[ -n "$PORT_FORWARDING" ]]; then
+    local -a port_forwarding_args
+    read -r -a port_forwarding_args <<< "$PORT_FORWARDING"
+    docker_args+=("${port_forwarding_args[@]}")
+  fi
+  docker_args+=(--name "$CONTAINER_NAME" "universalrobots/ursim_${ROBOT_SERIES}:$URSIM_VERSION")
+
   if [ "$TEST_RUN" = true ]; then
-    echo "$docker_cmd" | tr -s ' '
+    echo "${docker_args[*]}" | tr -s ' '
     exit 0
   fi
-  $docker_cmd || exit 2
+  "${docker_args[@]}" || exit 2
 
   # Stop container when interrupted
   TRAP_CMD="

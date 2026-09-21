@@ -132,28 +132,29 @@ public:
     code.timestamp = pkg.timestamp_;
     code.to_string = pkg.toString();
 
-    const auto log_contents = "Logging an ErrorCodeMessage from the UR Controller Box: " + pkg.toString();
+    const auto log_contents = pkg.toString();
 
     switch (code.report_level)
     {
-      case urcl::primary_interface::ReportLevel::DEBUG:
-      case urcl::primary_interface::ReportLevel::DEVL_DEBUG:
-      case urcl::primary_interface::ReportLevel::DEVL_INFO:
-      case urcl::primary_interface::ReportLevel::DEVL_WARNING:
-      case urcl::primary_interface::ReportLevel::DEVL_VIOLATION:
-      case urcl::primary_interface::ReportLevel::DEVL_FAULT:
-        URCL_LOG_DEBUG(log_contents.c_str());
+      case ReportLevel::DEBUG:
+      case ReportLevel::DEVL_DEBUG:
+      case ReportLevel::DEVL_INFO:
+      case ReportLevel::DEVL_WARNING:
+      case ReportLevel::DEVL_VIOLATION:
+      case ReportLevel::DEVL_FAULT:
+      case ReportLevel::DEVL_CRITICAL_FAULT:
+        URCL_LOG_DEBUG("%s", log_contents.c_str());
         break;
-      case urcl::primary_interface::ReportLevel::INFO:
-        URCL_LOG_INFO(log_contents.c_str());
+      case ReportLevel::INFO:
+        URCL_LOG_INFO("%s", log_contents.c_str());
         break;
-      case urcl::primary_interface::ReportLevel::WARNING:
-        URCL_LOG_WARN(log_contents.c_str());
+      case ReportLevel::WARNING:
+        URCL_LOG_WARN("%s", log_contents.c_str());
         break;
-      default:
-        // urcl::primary_interface::ReportLevel::VIOLATION:
-        // urcl::primary_interface::ReportLevel::FAULT:
-        URCL_LOG_ERROR(log_contents.c_str());
+      case ReportLevel::VIOLATION:
+      case ReportLevel::FAULT:
+      case ReportLevel::CRITICAL_FAULT:
+        URCL_LOG_ERROR("%s", log_contents.c_str());
         break;
     }
 

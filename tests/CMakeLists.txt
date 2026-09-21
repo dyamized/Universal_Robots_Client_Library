@@ -23,22 +23,27 @@ target_link_libraries(fake_primary_server PRIVATE ur_client_library::urcl)
 include(GoogleTest)
 
 option(INTEGRATION_TESTS "Build the integration tests that require a running robot / URSim" OFF)
-option(POLYSCOPE_X_TESTS_WITH_REMOTE_CONTROL "Run Polyscope X tests that require remote control" OFF)
 option(CHECK_RTDE_DOCS_RECIPE "Fetch the RTDE documentation to auto-generate a recipe containing all output fields and check that with the RTDE client. Requires python3 and pandas and an internet connection." OFF)
+set(INTEGRATION_TESTS_ROBOT_IP "" CACHE STRING "If set, override the default robot IP (192.168.56.101) compiled into each integration test main() by passing --robot_ip <ip> to every ctest-registered integration test.")
 # Build Tests
 if (INTEGRATION_TESTS)
-  # Integration tests require a robot reachable at 192.168.56.101. Therefore, they have to be
-  # activated separately.
-  
-  if(POLYSCOPE_X_TESTS_WITH_REMOTE_CONTROL)
-    add_compile_definitions(POLYSCOPE_X_TESTS_WITH_REMOTE_CONTROL=1 )
+  # Integration tests require a reachable robot / URSim. The compiled-in default
+  # address is 192.168.56.101; configure with -DINTEGRATION_TESTS_ROBOT_IP=<ip>
+  # to override (e.g. 127.0.0.1 for a host-networked URSim).
+  set(INTEGRATION_TESTS_ROBOT_IP_ARG "")
+  if(INTEGRATION_TESTS_ROBOT_IP)
+    set(INTEGRATION_TESTS_ROBOT_IP_ARG --robot_ip ${INTEGRATION_TESTS_ROBOT_IP})
   endif()
 
   add_executable(rtde_tests test_rtde_client.cpp fake_rtde_server.cpp)
-  target_link_libraries(rtde_tests PRIVATE ur_client_library::urcl GTest::gtest_main)
+  target_link_libraries(rtde_tests PRIVATE ur_client_library::urcl GTest::gmock_main)
   gtest_add_tests(TARGET      rtde_tests
                   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                  EXTRA_ARGS ${INTEGRATION_TESTS_ROBOT_IP_ARG}
   )
+  # Bound this teardown regression test so a hang fails CI fast instead of timing out the job.
+  set_tests_properties(RTDEClientTest.destructor_not_blocked_by_stuck_reconnect_thread
+                       PROPERTIES TIMEOUT 60)
   if (CHECK_RTDE_DOCS_RECIPE)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
     add_custom_target(generate_outputs ALL COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/resources/generate_rtde_outputs.py)
@@ -49,12 +54,16 @@ if (INTEGRATION_TESTS)
   add_executable(dashboard_client_g5_tests test_dashboard_client_g5.cpp)
   target_link_libraries(dashboard_client_g5_tests PRIVATE ur_client_library::urcl GTest::gtest_main)
   gtest_add_tests(TARGET      dashboard_client_g5_tests
+                  EXTRA_ARGS ${INTEGRATION_TESTS_ROBOT_IP_ARG}
   )
 
   add_executable(dashboard_client_x_tests test_dashboard_client_x.cpp)
+  target_include_directories(dashboard_client_x_tests PRIVATE ${CMAKE_SOURCE_DIR}/3rdparty)
   target_link_libraries(dashboard_client_x_tests PRIVATE ur_client_library::urcl GTest::gtest_main)
+  target_compile_options(dashboard_client_x_tests PRIVATE -Wno-uninitialized)
   gtest_add_tests(TARGET      dashboard_client_x_tests
                   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                  EXTRA_ARGS ${INTEGRATION_TESTS_ROBOT_IP_ARG}
   )
 
   # Spline tests
@@ -62,14 +71,14 @@ if (INTEGRATION_TESTS)
   target_link_libraries(spline_tests_urcap PRIVATE ur_client_library::urcl GTest::gtest_main)
   gtest_add_tests(TARGET      spline_tests_urcap
                   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                  EXTRA_ARGS --headless false
+                  EXTRA_ARGS --headless false ${INTEGRATION_TESTS_ROBOT_IP_ARG}
                   TEST_SUFFIX _urcap
   )
   add_executable(spline_tests_headless test_spline_interpolation.cpp)
   target_link_libraries(spline_tests_headless PRIVATE ur_client_library::urcl GTest::gtest_main)
   gtest_add_tests(TARGET      spline_tests_headless
                   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                  EXTRA_ARGS --headless true
+                  EXTRA_ARGS --headless true ${INTEGRATION_TESTS_ROBOT_IP_ARG}
                   TEST_SUFFIX _headless
   )
 
@@ -78,14 +87,14 @@ if (INTEGRATION_TESTS)
   target_link_libraries(ur_driver_tests_urcap PRIVATE ur_client_library::urcl GTest::gtest_main)
   gtest_add_tests(TARGET      ur_driver_tests_urcap
                   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                  EXTRA_ARGS --headless false
+                  EXTRA_ARGS --headless false ${INTEGRATION_TESTS_ROBOT_IP_ARG}
                   TEST_SUFFIX _urcap
   )
   add_executable(ur_driver_tests_headless test_ur_driver.cpp)
   target_link_libraries(ur_driver_tests_headless PRIVATE ur_client_library::urcl GTest::gtest_main)
   gtest_add_tests(TARGET      ur_driver_tests_headless
                   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                  EXTRA_ARGS --headless true
+                  EXTRA_ARGS --headless true ${INTEGRATION_TESTS_ROBOT_IP_ARG}
                   TEST_SUFFIX _headless
   )
 
@@ -94,14 +103,24 @@ if (INTEGRATION_TESTS)
   target_link_libraries(external_control_program_tests_urcap PRIVATE ur_client_library::urcl GTest::gtest_main)
   gtest_add_tests(TARGET      external_control_program_tests_urcap
                   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                  EXTRA_ARGS --headless false
+                  EXTRA_ARGS --headless false ${INTEGRATION_TESTS_ROBOT_IP_ARG}
                   TEST_SUFFIX _urcap
   )
   add_executable(external_control_program_tests_headless test_external_control_program.cpp)
   target_link_libraries(external_control_program_tests_headless PRIVATE ur_client_library::urcl GTest::gtest_main)
   gtest_add_tests(TARGET      external_control_program_tests_headless
                   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                  EXTRA_ARGS --headless true
+                  EXTRA_ARGS --headless true ${INTEGRATION_TESTS_ROBOT_IP_ARG}
+                  TEST_SUFFIX _headless
+  )
+
+  # Streaming trajectory tests. Headless-only; the URCap path does not
+  # exercise anything different at the URScript level for streaming.
+  add_executable(trajectory_streaming_tests_headless test_trajectory_streaming.cpp)
+  target_link_libraries(trajectory_streaming_tests_headless PRIVATE ur_client_library::urcl GTest::gtest_main)
+  gtest_add_tests(TARGET      trajectory_streaming_tests_headless
+                  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                  EXTRA_ARGS --headless true ${INTEGRATION_TESTS_ROBOT_IP_ARG}
                   TEST_SUFFIX _headless
   )
 
@@ -110,14 +129,30 @@ if (INTEGRATION_TESTS)
   target_link_libraries(instruction_executor_test_urcap PRIVATE ur_client_library::urcl GTest::gtest_main)
   gtest_add_tests(TARGET instruction_executor_test_urcap
                   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                  EXTRA_ARGS --headless false
+                  EXTRA_ARGS --headless false ${INTEGRATION_TESTS_ROBOT_IP_ARG}
                   TEST_SUFFIX _urcap
   )
   add_executable(instruction_executor_test_headless test_instruction_executor.cpp)
   target_link_libraries(instruction_executor_test_headless PRIVATE ur_client_library::urcl GTest::gtest_main)
   gtest_add_tests(TARGET instruction_executor_test_headless
                   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                  EXTRA_ARGS --headless true
+                  EXTRA_ARGS --headless true ${INTEGRATION_TESTS_ROBOT_IP_ARG}
+                  TEST_SUFFIX _headless
+  )
+
+  # InstructionExecutor standalone tests
+  add_executable(instruction_executor_standalone_test_urcap test_instruction_executor_standalone.cpp)
+  target_link_libraries(instruction_executor_standalone_test_urcap PRIVATE ur_client_library::urcl GTest::gtest_main)
+  gtest_add_tests(TARGET instruction_executor_standalone_test_urcap
+                  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                  EXTRA_ARGS --headless false ${INTEGRATION_TESTS_ROBOT_IP_ARG}
+                  TEST_SUFFIX _urcap
+  )
+  add_executable(instruction_executor_standalone_test_headless test_instruction_executor_standalone.cpp)
+  target_link_libraries(instruction_executor_standalone_test_headless PRIVATE ur_client_library::urcl GTest::gtest_main)
+  gtest_add_tests(TARGET instruction_executor_standalone_test_headless
+                  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                  EXTRA_ARGS --headless true ${INTEGRATION_TESTS_ROBOT_IP_ARG}
                   TEST_SUFFIX _headless
   )
 
@@ -125,12 +160,14 @@ if (INTEGRATION_TESTS)
   target_link_libraries(primary_client_test_headless PRIVATE ur_client_library::urcl GTest::gtest_main)
   gtest_add_tests(TARGET primary_client_test_headless
                   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                  EXTRA_ARGS ${INTEGRATION_TESTS_ROBOT_IP_ARG}
   )
 
   add_executable(ur_driver_deprecated_constructor_test test_deprecated_ur_driver_construction.cpp)
   target_link_libraries(ur_driver_deprecated_constructor_test PRIVATE ur_client_library::urcl GTest::gtest_main)
   gtest_add_tests(TARGET ur_driver_deprecated_constructor_test
                   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                  EXTRA_ARGS ${INTEGRATION_TESTS_ROBOT_IP_ARG}
   )
 else()
   message(STATUS "Skipping integration tests.")
@@ -147,10 +184,26 @@ target_link_libraries(primary_parser_tests PRIVATE ur_client_library::urcl GTest
 gtest_add_tests(TARGET      primary_parser_tests
 )
 
+add_executable(error_code_message_tests test_error_code_message.cpp)
+target_link_libraries(error_code_message_tests PRIVATE ur_client_library::urcl GTest::gtest_main)
+gtest_add_tests(TARGET      error_code_message_tests
+)
+
 add_executable(fake_primary_server_tests test_fake_primary_server.cpp fake_primary_server.cpp)
 target_link_libraries(fake_primary_server_tests PRIVATE ur_client_library::urcl GTest::gtest_main)
 gtest_add_tests(TARGET      fake_primary_server_tests
 )
+
+# Robot-free regression test for ~PrimaryClient() not blocking on a stuck
+# reconnect thread. Uses the in-process FakePrimaryServer so it runs without a
+# robot (unlike the INTEGRATION_TESTS-gated primary_client_test_headless).
+add_executable(primary_client_reconnect_tests test_primary_client_reconnect.cpp fake_primary_server.cpp)
+target_link_libraries(primary_client_reconnect_tests PRIVATE ur_client_library::urcl GTest::gtest_main)
+gtest_add_tests(TARGET      primary_client_reconnect_tests
+)
+# Bound this teardown regression test so a hang fails CI in ~1 min instead of timing out the job.
+set_tests_properties(PrimaryClientReconnectTest.destructor_not_blocked_by_stuck_reconnect_thread
+                     PROPERTIES TIMEOUT 60)
 
 
 
@@ -248,6 +301,15 @@ add_executable(tcp_socket_tests test_tcp_socket.cpp)
 target_link_libraries(tcp_socket_tests PRIVATE ur_client_library::urcl GTest::gtest_main)
 gtest_add_tests(TARGET tcp_socket_tests
 )
+# Bound the interruptible-setup regression tests so a hang fails CI fast instead of timing out the job.
+set_tests_properties(TCPSocketTest.setup_interruptible_by_close
+                     TCPSocketTest.setup_interruptible_during_blocking_connect
+                     PROPERTIES TIMEOUT 60)
+
+add_executable(unique_fd_tests test_unique_fd.cpp)
+target_link_libraries(unique_fd_tests PRIVATE ur_client_library::urcl GTest::gtest_main)
+gtest_add_tests(TARGET unique_fd_tests
+)
 
 add_executable(stream_tests test_stream.cpp)
 target_link_libraries(stream_tests PRIVATE ur_client_library::urcl GTest::gtest_main)
@@ -287,6 +349,11 @@ gtest_add_tests(TARGET helpers_tests
 add_executable(types_tests test_types.cpp)
 target_link_libraries(types_tests PRIVATE ur_client_library::urcl GTest::gtest_main)
 gtest_add_tests(TARGET types_tests
+)
+
+add_executable(datatypes_tests test_datatypes.cpp)
+target_link_libraries(datatypes_tests PRIVATE ur_client_library::urcl GTest::gtest_main)
+gtest_add_tests(TARGET datatypes_tests
 )
 
 add_executable(motion_primitives_tests test_motion_primitives.cpp)

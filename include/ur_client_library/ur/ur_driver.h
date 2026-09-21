@@ -585,13 +585,23 @@ public:
   /*!
    * \brief Writes a control message in trajectory forward mode.
    *
-   * \param trajectory_action The action to be taken, such as starting a new trajectory
-   * \param point_number The number of points of a new trajectory to be sent
-   * \param robot_receive_timeout The read timeout configuration for the reverse socket running in the external
-   * control script on the robot. If you want to make the read function blocking then use RobotReceiveTimeout::off()
-   * function to create the RobotReceiveTimeout object
+   * Selects which trajectory-control action the URScript dispatcher takes (start a finite
+   * trajectory, begin or end an open-ended streaming trajectory, cancel, or no-op keepalive)
+   * and, where applicable, communicates a point count. See
+   * control::ReverseInterface::writeTrajectoryControlMessage for the per-mode semantics of
+   * \p trajectory_action and \p point_number.
+   *
+   * \param trajectory_action The trajectory-control action to take.
+   * \param point_number Mode-dependent point-count argument; see the underlying interface.
+   * \param robot_receive_timeout The read timeout configuration for the reverse socket running in
+   * the external control script on the robot. If you want to make the read function blocking
+   * then use RobotReceiveTimeout::off() function to create the RobotReceiveTimeout object.
    *
    * \returns True on successful write.
+   *
+   * \see control::ReverseInterface::writeTrajectoryControlMessage
+   * \see examples/trajectory_point_interface.cpp (finite trajectory)
+   * \see examples/trajectory_streaming.cpp (open-ended streaming trajectory)
    */
   bool
   writeTrajectoryControlMessage(const control::TrajectoryControlMessage trajectory_action, const int point_number = 0,
@@ -630,6 +640,21 @@ public:
    * \returns True on successful write.
    */
   bool setPayload(const float mass, const vector3d_t& cog);
+
+  /*!
+   * \brief Set the target payload mass, center of gravity and inertia matrix
+   *
+   * \param mass mass in kilograms
+   * \param cog  Center of Gravity, a vector [CoGx, CoGy, CoGz] specifying the displacement (in meters) from the
+   * toolmount
+   * \param inertia Inertia matrix elements [Ixx, Iyy, Izz, Ixy, Ixz, Iyz]
+   * \param transition_time Duration of the payload property changes in seconds
+   *
+   * \returns True, if the write was performed successfully, false otherwise.
+   */
+  bool setTargetPayload(const float mass, const vector3d_t& cog,
+                        const vector6d_t& inertia = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 },
+                        const double transition_time = 0.0);
 
   /*!
    * \brief Set the gravity vector. Note: It requires the external control script to be running or
@@ -948,6 +973,14 @@ public:
   void unregisterTrajectoryDoneCallback(const uint32_t handler_id)
   {
     trajectory_interface_->removeTrajectoryEndCallback(handler_id);
+  }
+
+  /*!
+   * \brief Returns the multiplier used to encode spline point velocities and accelerations.
+   */
+  int32_t getVelAccMultiplier() const
+  {
+    return trajectory_interface_->getVelAccMultiplier();
   }
 
   /*!

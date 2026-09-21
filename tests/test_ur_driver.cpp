@@ -34,6 +34,8 @@
 #include <ur_client_library/ur/ur_driver.h>
 #include <ur_client_library/example_robot_wrapper.h>
 #include <algorithm>
+#include <fstream>
+#include <iterator>
 #include <thread>
 #include "test_utils.h"
 
@@ -360,6 +362,9 @@ TEST_F(UrDriverTest, set_tcp_offset)
     EXPECT_DOUBLE_EQ(tcp_offset_received[i], tcp_offset[i]);
   }
 
+  // reset the tcp offset to avoid affecting other tests
+  ASSERT_TRUE(g_my_robot->getUrDriver()->setTcpOffset({ 0, 0, 0, 0, 0, 0 }));
+
   // Stop program on robot
   g_my_robot->getUrDriver()->stopControl();
   g_my_robot->waitForProgramNotRunning(1000);
@@ -372,6 +377,36 @@ TEST_F(UrDriverTest, set_tcp_offset)
 
   // Check that we can't set TCP offset when the program isn't running
   ASSERT_FALSE(g_my_robot->getUrDriver()->setTcpOffset(tcp_offset));
+}
+
+TEST_F(UrDriverTest, set_target_payload_fallback_script)
+{
+  g_my_robot->getUrDriver()->stopControl();
+  ASSERT_TRUE(g_my_robot->waitForProgramNotRunning(1000));
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  double mass = 1.0;
+  vector3d_t cog = { 0.2, 0.3, 0.1 };
+  vector6d_t inertia = { 0.4, 0.7, 0.8, 0.2, 0.5, 0.6 };
+  double transition_time = 0.002;
+
+  EXPECT_TRUE(g_my_robot->getUrDriver()->setTargetPayload(mass, cog, inertia, transition_time));
+
+  // restore empty payload
+  EXPECT_TRUE(g_my_robot->getUrDriver()->setTargetPayload(0, { 0, 0, 0 }, { 0, 0, 0, 0, 0, 0 }, 0.002));
+}
+
+TEST_F(UrDriverTest, set_target_payload)
+{
+  double mass = 1.0;
+  vector3d_t cog = { 0.2, 0.3, 0.1 };
+  vector6d_t inertia = { 0.4, 0.7, 0.8, 0.2, 0.5, 0.6 };
+  double transition_time = 0.002;
+
+  EXPECT_TRUE(g_my_robot->getUrDriver()->setTargetPayload(mass, cog, inertia, transition_time));
+
+  // restore empty payload
+  EXPECT_TRUE(g_my_robot->getUrDriver()->setTargetPayload(0, { 0, 0, 0 }, { 0, 0, 0, 0, 0, 0 }, 0.002));
 }
 
 TEST(UrDriverInitTest, setting_connection_limits_works_correctly)
@@ -459,6 +494,52 @@ TEST(UrDriverInitTest, both_recipe_file_and_vector_select_vector)
   EXPECT_TRUE(std::find(input_recipe.begin(), input_recipe.end(), INPUT_RECIPE_VECTOR_EXCLUDED_VALUE) ==
               input_recipe.end());
 }
+
+TEST(UrDriverInitTest, script_with_vel_acc_placeholder_uses_fine_multiplier)
+{
+  UrDriverConfiguration config;
+  config.robot_ip = g_ROBOT_IP;
+  config.input_recipe_file = INPUT_RECIPE;
+  config.output_recipe_file = OUTPUT_RECIPE;
+  config.headless_mode = g_HEADLESS;
+  config.script_file = SCRIPT_FILE;
+
+  UrDriver ur_driver(config);
+  EXPECT_EQ(ur_driver.getVelAccMultiplier(), control::TrajectoryPointInterface::MULT_VEL_ACC);
+}
+
+TEST(UrDriverInitTest, legacy_script_falls_back_to_joint_state_multiplier)
+{
+  // Legacy scripts define no dedicated spline vel/acc multiplier.
+  std::ifstream ifs(SCRIPT_FILE);
+  ASSERT_TRUE(ifs.is_open());
+  std::string script((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+  const std::string placeholder = "{{VEL_ACC_REPLACE}}";
+  ASSERT_NE(script.find(placeholder), std::string::npos);
+  while (script.find(placeholder) != std::string::npos)
+  {
+    script.replace(script.find(placeholder), placeholder.size(), "{{JOINT_STATE_REPLACE}}");
+  }
+
+  const char legacy_script_file[] = "legacy_urscript.HRRW";
+  std::ofstream ofs(legacy_script_file);
+  ASSERT_TRUE(ofs.is_open());
+  ofs << script;
+  ofs.close();
+
+  UrDriverConfiguration config;
+  config.robot_ip = g_ROBOT_IP;
+  config.input_recipe_file = INPUT_RECIPE;
+  config.output_recipe_file = OUTPUT_RECIPE;
+  config.headless_mode = g_HEADLESS;
+  config.script_file = legacy_script_file;
+
+  UrDriver ur_driver(config);
+  const int32_t legacy_multiplier = control::ReverseInterface::MULT_JOINTSTATE;
+  EXPECT_EQ(ur_driver.getVelAccMultiplier(), legacy_multiplier);
+
+  std::remove(legacy_script_file);
+}
 // TODO we should add more tests for the UrDriver class.
 
 int main(int argc, char* argv[])
@@ -470,13 +551,13 @@ int main(int argc, char* argv[])
     if (std::string(argv[i]) == "--robot_ip" && i + 1 < argc)
     {
       g_ROBOT_IP = argv[i + 1];
-      break;
+      ++i;
     }
     if (std::string(argv[i]) == "--headless" && i + 1 < argc)
     {
       std::string headless = argv[i + 1];
       g_HEADLESS = headless == "true" || headless == "1" || headless == "True" || headless == "TRUE";
-      break;
+      ++i;
     }
   }
 

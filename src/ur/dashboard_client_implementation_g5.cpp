@@ -220,7 +220,7 @@ bool DashboardClientImplG5::connect(const size_t max_num_tries, const std::chron
     TCPSocket::setReceiveTimeout(tv);
     try
     {
-      if (TCPSocket::setup(host_, port_, max_num_tries, reconnection_time))
+      if (TCPSocket::connect(host_, port_, max_num_tries, reconnection_time))
       {
         URCL_LOG_INFO("%s", read().c_str());
         ret_val = true;
@@ -278,7 +278,7 @@ VersionInformation DashboardClientImplG5::queryPolyScopeVersion()
   return VersionInformation::fromString(version_string);
 }
 
-void DashboardClientImplG5::assertHasCommand(const std::string& command) const
+void DashboardClientImplG5::assertHasCommand(const std::string& command)
 {
   if (polyscope_version_ == VersionInformation::fromString("0.0.0"))
   {
@@ -776,7 +776,8 @@ DashboardResponse DashboardClientImplG5::commandIsInRemoteControl()
   return response;
 }
 
-DashboardResponse DashboardClientImplG5::commandPopup(const std::string& popup_text)
+DashboardResponse DashboardClientImplG5::commandPopup(const std::string& popup_text,
+                                                      [[maybe_unused]] const std::string& popup_title)
 {
   DashboardResponse response;
   try
@@ -1168,6 +1169,11 @@ DashboardResponse DashboardClientImplG5::commandGenerateSupportFile(const std::s
   }
   TCPSocket::setReceiveTimeout(configured_tv);  // Reset to configured receive timeout
   return response;
+}
+
+DashboardResponse DashboardClientImplG5::commandDownloadSupportFiles([[maybe_unused]] const std::string& save_path)
+{
+  throw NotImplementedException("commandDownloadSupportFiles is not implemented for DashboardClientImplG5.");
 }
 
 DashboardResponse DashboardClientImplG5::commandSaveLog()

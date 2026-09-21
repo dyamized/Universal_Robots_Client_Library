@@ -656,6 +656,7 @@ TEST_F(DashboardClientTestG5, all_x_only_commands_throw)
   EXPECT_THROW(dashboard_client_->commandUpdateProgram(""), NotImplementedException);
   EXPECT_THROW(dashboard_client_->commandDownloadProgram("", ""), NotImplementedException);
   EXPECT_THROW(dashboard_client_->commandResume(), NotImplementedException);
+  EXPECT_THROW(dashboard_client_->commandDownloadSupportFiles(""), NotImplementedException);
 }
 
 int main(int argc, char* argv[])
@@ -667,7 +668,7 @@ int main(int argc, char* argv[])
     if (std::string(argv[i]) == "--robot_ip" && i + 1 < argc)
     {
       g_ROBOT_IP = argv[i + 1];
-      break;
+      ++i;
     }
   }
 

@@ -30,6 +30,8 @@ add_library(urcl
     src/primary/primary_client.cpp
     src/primary/robot_message.cpp
     src/primary/robot_message/error_code_message.cpp
+    src/primary/robot_message/hardware_info_message.cpp
+    src/ur/error_code_overrides.cpp
     src/primary/robot_message/key_message.cpp
     src/primary/robot_message/runtime_exception_message.cpp
     src/primary/robot_message/text_message.cpp
@@ -118,6 +120,9 @@ endif()
 if(CMAKE_THREAD_LIBS_INIT)
   target_link_libraries(urcl PUBLIC "${CMAKE_THREAD_LIBS_INIT}")
 endif()
+if(UNIX AND NOT APPLE)
+  target_link_libraries(urcl PUBLIC "rt")
+endif()
 
 # When warnings are treated as errors, also enable high warning level for all targets
 if(CMAKE_COMPILE_WARNING_AS_ERROR)
@@ -126,6 +131,37 @@ if(CMAKE_COMPILE_WARNING_AS_ERROR)
   else()
     add_compile_options(-Wall -Wextra)
   endif()
+endif()
+
+##
+## Error code text generation / version check targets
+##
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_FOUND)
+  set(_error_codes_header
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/ur_client_library/ur/error_code_texts.h")
+  set(_error_codes_overlay
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/error_code_overrides.json")
+  set(_error_codes_script
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_error_codes.py")
+
+  add_custom_target(generate_error_codes
+    COMMAND ${Python3_EXECUTABLE} ${_error_codes_script}
+            --overlay ${_error_codes_overlay}
+            --output  ${_error_codes_header}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMENT "Regenerating error_code_texts.h from upstream UR ErrorCodes JSON"
+    VERBATIM
+  )
+
+  add_custom_target(check_error_codes
+    COMMAND ${Python3_EXECUTABLE} ${_error_codes_script}
+            --check
+            --header ${_error_codes_header}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMENT "Checking error_code_texts.h version against upstream UR ErrorCodes JSON"
+    VERBATIM
+  )
 endif()
 
 ##

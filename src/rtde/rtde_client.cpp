@@ -30,6 +30,7 @@
 #include "ur_client_library/exceptions.h"
 #include "ur_client_library/log.h"
 #include "ur_client_library/rtde/data_package.h"
+#include "ur_client_library/helpers.h"
 #include <algorithm>
 #include <chrono>
 #include <string>
@@ -87,11 +88,11 @@ RTDEClient::~RTDEClient()
 {
   prod_->setReconnectionCallback(nullptr);
   stop_reconnection_ = true;
+  disconnect();
   if (reconnecting_thread_.joinable())
   {
     reconnecting_thread_.join();
   }
-  disconnect();
 }
 
 bool RTDEClient::init(const size_t max_connection_attempts, const std::chrono::milliseconds reconnection_timeout,
@@ -418,7 +419,7 @@ bool RTDEClient::setupOutputs()
         else
         {
           URCL_LOG_ERROR("%s", error_message.str().c_str());
-          throw UrException(error_message.str());
+          throw RTDEInvalidKeyException(unavailable_variables, error_message.str());
         }
       }
       else
@@ -508,11 +509,8 @@ bool RTDEClient::setupInputs()
 
 void RTDEClient::disconnect()
 {
-  if (client_state_ > ClientState::UNINITIALIZED)
-  {
-    stream_.disconnect();
-    writer_.stop();
-  }
+  stream_.disconnect();
+  writer_.stop();
   client_state_ = ClientState::UNINITIALIZED;
   prod_->stopProducer();
   stopBackgroundRead();
@@ -976,6 +974,10 @@ void RTDEClient::stopBackgroundRead()
 
 void RTDEClient::backgroundReadThreadFunc()
 {
+  pthread_t this_thread = pthread_self();
+  const int max_thread_priority = sched_get_priority_max(SCHED_FIFO);
+  setFiFoScheduling(this_thread, max_thread_priority);
+
   while (background_read_running_)
   {
     std::unique_lock<std::mutex> lock(reconnect_mutex_, std::defer_lock);

@@ -49,6 +49,7 @@ namespace urcl
 static const std::string BEGIN_REPLACE("BEGIN_REPLACE");
 static const std::string JOINT_STATE_REPLACE("JOINT_STATE_REPLACE");
 static const std::string TIME_REPLACE("TIME_REPLACE");
+static const std::string VEL_ACC_REPLACE("VEL_ACC_REPLACE");
 static const std::string SERVO_J_REPLACE("SERVO_J_REPLACE");
 static const std::string SERVER_IP_REPLACE("SERVER_IP_REPLACE");
 static const std::string SERVER_PORT_REPLACE("SERVER_PORT_REPLACE");
@@ -111,6 +112,7 @@ void UrDriver::init(const UrDriverConfiguration& config)
   control::ScriptReader::DataDict data;
   data[JOINT_STATE_REPLACE] = std::to_string(control::ReverseInterface::MULT_JOINTSTATE);
   data[TIME_REPLACE] = std::to_string(control::TrajectoryPointInterface::MULT_TIME);
+  data[VEL_ACC_REPLACE] = std::to_string(control::TrajectoryPointInterface::MULT_VEL_ACC);
   std::ostringstream out;
   out << "lookahead_time=" << servoj_lookahead_time_ << ", gain=" << servoj_gain_;
   data[SERVO_J_REPLACE] = out.str();
@@ -144,6 +146,20 @@ void UrDriver::init(const UrDriverConfiguration& config)
 
   script_reader_.reset(new control::ScriptReader());
   std::string prog = script_reader_->readScriptFile(config.script_file, data);
+
+  // Legacy scripts decode spline vel/acc with MULT_jointstate; only scripts defining MULT_velacc
+  // use the finer encoding.
+  if (script_reader_->isVariableRegistered(VEL_ACC_REPLACE))
+  {
+    trajectory_interface_->setVelAccMultiplier(control::TrajectoryPointInterface::MULT_VEL_ACC);
+  }
+  else
+  {
+    URCL_LOG_WARN("Control script does not contain the '{{%s}}' placeholder. Falling back to legacy spline vel/acc "
+                  "encoding with reduced precision.",
+                  VEL_ACC_REPLACE.c_str());
+    trajectory_interface_->setVelAccMultiplier(control::ReverseInterface::MULT_JOINTSTATE);
+  }
 
   if (in_headless_mode_)
   {
@@ -309,6 +325,41 @@ bool UrDriver::setPayload(const float mass, const vector3d_t& cog)
     cmd << "sec setup():" << std::endl
         << " set_payload(" << mass << ", [" << cog[0] << ", " << cog[1] << ", " << cog[2] << "])" << std::endl
         << "end";
+    return sendScript(cmd.str());
+  }
+}
+
+bool UrDriver::setTargetPayload(const float mass, const vector3d_t& cog, const vector6d_t& inertia,
+                                const double transition_time)
+{
+  if (script_command_interface_->clientConnected())
+  {
+    return script_command_interface_->setTargetPayload(mass, &cog, &inertia, transition_time);
+  }
+  else
+  {
+    URCL_LOG_WARN("Script command interface is not running. Falling back to sending plain script code. On e-Series "
+                  "robots this will only work, if the robot is in remote_control mode.");
+
+    std::stringstream cmd;
+    cmd.imbue(std::locale::classic());  // Make sure, decimal divider is actually '.'
+
+    if ((getVersion().major > 5) || (getVersion().major == 5 && getVersion().minor >= 10))
+    {
+      cmd << "sec setup():" << std::endl
+          << " set_target_payload(" << mass << ", [" << cog[0] << ", " << cog[1] << ", " << cog[2] << "] , ["
+          << inertia[0] << ", " << inertia[1] << ", " << inertia[2] << ", " << inertia[3] << ", " << inertia[4] << ", "
+          << inertia[5] << "] , " << transition_time << ")" << std::endl
+          << "end";
+    }
+    else
+    {
+      cmd << "sec setup():" << std::endl
+          << " set_payload(" << mass << ", [" << cog[0] << ", " << cog[1] << ", " << cog[2] << "])" << std::endl
+          << " textmsg(\"PolyScope < 5.10.0. Inertia and transition_time ignored.\")" << std::endl
+          << "end";
+    }
+
     return sendScript(cmd.str());
   }
 }
